@@ -82,6 +82,20 @@ function scoringTestSuite() {
             assertCountValue(3, $clubBreakdown['totals']);
             assertSameValue($caBreakdown['total'], $clubBreakdown['total']);
         },
+        'event_participation_factor_uses_the_square_root_of_entries_over_opportunities' => function () {
+            $athlete = ['age' => 16];
+            $results = [buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #1', 16, 'Male', 12.0)];
+            $meetEvents = [
+                ['name' => 'SS #1', 'events' => ['100m']],
+                ['name' => 'SS #2', 'events' => ['100m']],
+                ['name' => 'SS #3', 'events' => ['100m']],
+                ['name' => 'SS #4', 'events' => ['100m']],
+            ];
+
+            $summary = buildAthleteEventSummary($athlete, '100m', $results, $meetEvents);
+
+            assertSameValue(0.5, $summary['participation_score']);
+        },
         'club_cpf_helpers_return_numeric_precision' => function () {
             $cpfOld = calcClubParticipationFactor(1, 3);
             $cpfNew = calcAverageAthleteMeetParticipationFactor([
@@ -542,13 +556,13 @@ function scoringTestSuite() {
 
             assertSameValue([
                 'joshua_2008' => [
-                    'score' => 127.0,
+                    'score' => 442.0,
                     'meet_pf' => '0.076923',
                     'attended' => 1,
                     'eligible' => 13,
                 ],
                 'lucas_butler' => [
-                    'score' => 1232.0,
+                    'score' => 1648.0,
                     'meet_pf' => '0.769231',
                     'attended' => 10,
                     'eligible' => 13,

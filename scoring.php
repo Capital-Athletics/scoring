@@ -149,7 +149,7 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
             return 0;
         }
 
-        return min($enteredCount, $offeredCount) / $offeredCount;
+        return sqrt(min($enteredCount, $offeredCount) / $offeredCount);
     };
 
     foreach ($meetEvents as $meet) {
@@ -229,7 +229,7 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
             'result_raw' => $eventResult['result_raw'],
             'meet_date_ts' => $eventResult['meet_date_ts'] ?? null,
             'score_data' => null,
-            'participation_score' => $offered > 0 ? $entered / $offered : 0,
+            'participation_score' => $calcParticipationScore($entered, $offered),
             'has_missing_record' => false,
             'is_season_best' => false,
         ];

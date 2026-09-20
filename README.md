@@ -56,7 +56,7 @@ The remaining results are grouped by athlete and then by event. For each event:
 
 * The app works out which meets offered that event.
 * It finds the athlete's best raw score for that event across those meets.
-* It calculates a participation factor based on how many times the athlete entered that event compared with how many times it was offered.
+* It calculates the event participation factor using `sqrt(entries / opportunities)` to soften the reduction for athletes who enter fewer opportunities. Previously this used the linear `entries / opportunities` ratio.
 * The final event score is the best points score multiplied by the participation factor, rounded to a whole number.
 
 The points score for each result is based on ACT record data in `data/reference/combined-act.csv` plus WMA adjustment tables for masters athletes:
