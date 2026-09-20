@@ -2,5 +2,5 @@
 .credentials.json
 .DS_Store
 vendor/
-data/hn
-data/ss
+data/
+!data/reference

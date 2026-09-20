@@ -173,9 +173,12 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
         $meetSummary = [
             'name' => $meetName,
             'result_str' => null,
+            'result_raw' => null,
+            'meet_date_ts' => null,
             'score_data' => null,
             'participation_score' => 0,
             'has_missing_record' => false,
+            'is_season_best' => false,
         ];
 
         foreach ($eventResults as $eventResult) {
@@ -188,6 +191,8 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
             $useOwnAgeLookup = $meetName === $specialMeetNames['u9-18'] && $eventResult['age'] <= 12;
 
             $meetSummary['result_str'] = $eventResult['result_str'];
+            $meetSummary['result_raw'] = $eventResult['result_raw'];
+            $meetSummary['meet_date_ts'] = $eventResult['meet_date_ts'] ?? null;
             $meetSummary['score_data'] = calcScore(
                 $eventResult['age'],
                 $eventResult['gender'],
@@ -221,9 +226,12 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
         $meetSummary = [
             'name' => $meetName,
             'result_str' => $eventResult['result_str'],
+            'result_raw' => $eventResult['result_raw'],
+            'meet_date_ts' => $eventResult['meet_date_ts'] ?? null,
             'score_data' => null,
             'participation_score' => $offered > 0 ? $entered / $offered : 0,
             'has_missing_record' => false,
+            'is_season_best' => false,
         ];
 
         $useOwnAgeLookup = $meetName === $specialMeetNames['u9-18'] && $eventResult['age'] <= 12;
@@ -250,12 +258,60 @@ function buildAthleteEventSummary($athlete, $eventName, $eventResults, $meetEven
     $participationScore = $calcParticipationScore($entered, $offered);
     $finalScore = round($bestScore * $participationScore);
 
+    foreach ($meetSummaries as $index => &$meetSummary) {
+        $meetSummary['season_best_order'] = $index;
+    }
+    unset($meetSummary);
+
+    usort($meetSummaries, static function ($a, $b) {
+        $aDate = $a['meet_date_ts'] ?? null;
+        $bDate = $b['meet_date_ts'] ?? null;
+
+        if ($aDate !== null && $bDate !== null && $aDate !== $bDate) {
+            return $aDate <=> $bDate;
+        }
+
+        return $a['season_best_order'] <=> $b['season_best_order'];
+    });
+
+    $seasonBestRaw = null;
+    $isTimeEvent = scoreIsTimeEvent($eventName);
+    $seasonBestCount = 0;
+
+    foreach ($meetSummaries as &$meetSummary) {
+        $rawResult = $meetSummary['result_raw'] ?? null;
+
+        if (!is_numeric($rawResult) || (float)$rawResult <= 0) {
+            continue;
+        }
+
+        $rawResult = (float)$rawResult;
+        if ($seasonBestRaw === null) {
+            $seasonBestRaw = $rawResult;
+            continue;
+        }
+
+        $isImprovement = $isTimeEvent ? $rawResult < $seasonBestRaw : $rawResult > $seasonBestRaw;
+        if ($isImprovement) {
+            $meetSummary['is_season_best'] = true;
+            $seasonBestRaw = $rawResult;
+            $seasonBestCount++;
+        }
+    }
+    unset($meetSummary);
+
+    foreach ($meetSummaries as &$meetSummary) {
+        unset($meetSummary['season_best_order']);
+    }
+    unset($meetSummary);
+
     return [
         'event' => $eventName,
         'meets' => $meetSummaries,
         'best_score' => $bestScore,
         'participation_score' => $participationScore,
         'final_score' => $finalScore,
+        'sb_count' => $seasonBestCount,
     ];
 }
 

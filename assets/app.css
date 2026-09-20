@@ -1,26 +1,12 @@
-.act-score-btn {
-    width: 1.2rem;
-    height: 1.2rem;
-    border: 0;
-    background: none;
-    color: darkorange;
-    cursor: pointer;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    bottom: -3px;
-    position: relative;
-    margin-right: 2px;
-}
-
-.act-score-btn svg {
-    width: 100%;
-    height: 100%;
-}
-
 .act-tooltip-trigger {
     cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+.athlete-sort-link,
+.athlete-sort-link:hover {
+    color: inherit;
     text-decoration: underline dotted;
     text-underline-offset: 2px;
 }

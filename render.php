@@ -74,16 +74,10 @@ function buildScoreTooltipLines($scoreData) {
     return $lines;
 }
 
-function renderScoreTooltipButton($scoreData) {
+function renderScoreTooltipTrigger($label, $scoreData) {
     $tooltipText = htmlspecialchars(implode("\n", buildScoreTooltipLines($scoreData)), ENT_QUOTES, 'UTF-8');
 
-    return renderTooltipButton($tooltipText);
-}
-
-function renderTooltipButton($tooltipText) {
-    return '<button type="button" class="act-score-btn" data-tip="' . $tooltipText . '">' .
-        '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="currentColor" d="M12 2c5.523 0 10 4.477 10 10a10 10 0 0 1-19.995.324L2 12l.004-.28C2.152 6.327 6.57 2 12 2m0 9h-1l-.117.007a1 1 0 0 0 0 1.986L11 13v3l.007.117a1 1 0 0 0 .876.876L12 17h1l.117-.007a1 1 0 0 0 .876-.876L14 16l-.007-.117a1 1 0 0 0-.764-.857l-.112-.02L13 15v-3l-.007-.117a1 1 0 0 0-.876-.876zm.01-3l-.127.007a1 1 0 0 0 0 1.986L12 10l.127-.007a1 1 0 0 0 0-1.986z"/></svg>' .
-        '</button>';
+    return '<span class="act-tooltip-trigger" data-tip="' . $tooltipText . '">' . htmlspecialchars($label) . '</span>';
 }
 
 function renderTooltipTextTrigger($label, $tooltipText) {
@@ -104,8 +98,7 @@ function renderAthleteMeetSummary($meetSummary) {
         $pointsScore = $meetSummary['score_data']['score'];
 
         echo htmlspecialchars($meetSummary['result_str']) . ' = ';
-        echo ($pointsScore === null ? '?' : $pointsScore) . ' pts';
-        echo renderScoreTooltipButton($meetSummary['score_data']);
+        echo renderScoreTooltipTrigger(($pointsScore === null ? '?' : $pointsScore) . ' pts', $meetSummary['score_data']);
 
         if ($meetSummary['has_missing_record']) {
             echo ' ' . renderMissingRecordBadge();
@@ -113,6 +106,10 @@ function renderAthleteMeetSummary($meetSummary) {
     }
 
     echo ' [PF=' . number_format($meetSummary['participation_score'], 2) . ']';
+
+    if (!empty($meetSummary['is_season_best'])) {
+        echo ' ⭐';
+    }
 
     echo '</li>';
     return ob_get_clean();
@@ -131,7 +128,8 @@ function renderAthleteEventSummary($eventSummary) {
     if ($eventSummary['best_score']) {
         echo '<div class="event-best-score"><strong>Best:</strong> ';
         echo $eventSummary['best_score'] . ' &times; ' . number_format($eventSummary['participation_score'], 2);
-        echo ' = ' . $eventSummary['final_score'] . '</div>';
+        echo ' = ' . $eventSummary['final_score'];
+        echo '<br><strong>SB:</strong> ' . (int)($eventSummary['sb_count'] ?? 0) . '</div>';
     }
 
     echo '</ul>';
@@ -179,7 +177,7 @@ function renderAthleteSummary($athleteName, $athlete, $eventSummaries, $athleteT
 
     echo '</ul>';
 
-    if ($athleteTotal) {
+    if ($athleteTotal || !empty($athlete['sb_count'])) {
         echo '<p>Total: ' . implode(' + ', $athleteTotals);
         echo ' = ' . number_format($athleteTotal) . ' pts';
         echo '<br>Meet PF: ' .
@@ -188,6 +186,7 @@ function renderAthleteSummary($athleteName, $athlete, $eventSummaries, $athleteT
             htmlspecialchars((string)($athlete['eligible_meet_count'] ?? 0)) .
             ' = ' .
             number_format((float)($athlete['meet_pf'] ?? 0), 2);
+        echo '<br>SB: ' . (int)($athlete['sb_count'] ?? 0);
         echo '</p>';
     }
 
@@ -195,7 +194,7 @@ function renderAthleteSummary($athleteName, $athlete, $eventSummaries, $athleteT
     return ob_get_clean();
 }
 
-function renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFilter, $clubNames) {
+function renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFilter, $clubNames, $datasets = [], $selectedSeason = FALLBACK_SEASON_KEY, $selectedComp = FALLBACK_COMPETITION_KEY) {
     ob_start();
     echo '<form method="get" class="view-toggles">';
 
@@ -204,7 +203,25 @@ function renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFil
             continue;
         }
 
+        if ($datasets && ($key === 'season' || $key === 'comp')) {
+            continue;
+        }
+
         echo '<input type="hidden" name="' . htmlspecialchars((string)$key, ENT_QUOTES, 'UTF-8') . '" value="' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '">';
+    }
+
+    if ($datasets) {
+        echo '<label>Data set <select name="dataset" onchange="this.form.requestSubmit()">';
+
+        foreach ($datasets as $dataset) {
+            $season = (string)($dataset['season'] ?? '');
+            $comp = (string)($dataset['comp'] ?? '');
+            $value = $season . '/' . $comp;
+            $selected = $season === $selectedSeason && $comp === $selectedComp ? ' selected' : '';
+            echo '<option value="' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '"' . $selected . '>' . htmlspecialchars($season . ' / ' . $comp, ENT_QUOTES, 'UTF-8') . '</option>';
+        }
+
+        echo '</select></label>';
     }
 
     echo '<label><input type="checkbox" name="verbose" value="1" onchange="this.form.requestSubmit()" ' . ($verbose ? 'checked' : '') . '> Verbose</label>';
@@ -230,9 +247,10 @@ function renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFil
     return ob_get_clean();
 }
 
-function renderAthleteScoresTable($athletes, $clubFilter, $showAllAthletes = false, $queryParams = []) {
+function renderAthleteScoresTable($athletes, $clubFilter, $showAllAthletes = false, $queryParams = [], $sort = 'score') {
+    $sort = $sort === 'sb' ? 'sb' : 'score';
+    $athletes = sortAthletes($athletes, $sort);
     $meetPfTooltip = renderTooltipTextTrigger('Meet PF', htmlspecialchars('Athlete meet participation factor: distinct meets attended divided by total meets in the current competition view.', ENT_QUOTES, 'UTF-8'));
-    $scoreTooltip = renderTooltipTextTrigger('Score', htmlspecialchars('Total athlete score after combining the counted event scores for this view.', ENT_QUOTES, 'UTF-8'));
     $visibleAthletes = [];
 
     foreach ($athletes as $athleteName => $athlete) {
@@ -249,40 +267,54 @@ function renderAthleteScoresTable($athletes, $clubFilter, $showAllAthletes = fal
         $visibleAthletes = array_slice($visibleAthletes, 0, 20, true);
     }
 
+    $sortQueryParams = $queryParams;
+    $sortQueryParams['all_athletes'] = $showAllAthletes ? '1' : '0';
     $queryParams['all_athletes'] = $showAllAthletes ? '0' : '1';
     $toggleLabel = $showAllAthletes ? 'Show top 20' : 'Show all';
     $toggleHref = '?' . http_build_query($queryParams);
+    $scoreSortQueryParams = $sortQueryParams;
+    $scoreSortQueryParams['sort'] = 'score';
+    $sbSortQueryParams = $sortQueryParams;
+    $sbSortQueryParams['sort'] = 'sb';
+    $scoreSortHref = '?' . http_build_query($scoreSortQueryParams);
+    $sbSortHref = '?' . http_build_query($sbSortQueryParams);
 
     ob_start();
     echo '<h2>Athlete scores</h2>';
     echo '<table class="table table-bordered table-striped table-sm">';
-    echo '<tr><th style="width:50px"></th><th>Name</th>';
+    echo '<tr><th style="width:50px"></th><th>Name</th><th style="text-align:right">Age</th>';
     if (!$clubFilter) {
         echo '<th>Club</th>';
     }
     echo '<th style="text-align:right">' . $meetPfTooltip . '</th>';
-    echo '<th style="text-align:right">' . $scoreTooltip . '</th>';
+    $sbSortTip = htmlspecialchars('Total number of strictly improved performances after the athlete\'s first valid result in each event.', ENT_QUOTES, 'UTF-8');
+    $scoreSortTip = htmlspecialchars('Total athlete score after combining the counted event scores for this view.', ENT_QUOTES, 'UTF-8');
+    echo '<th style="text-align:right"><a class="athlete-sort-link" href="' . htmlspecialchars($sbSortHref, ENT_QUOTES, 'UTF-8') . '" data-tip="' . $sbSortTip . '">SB' . ($sort === 'sb' ? ' ↓' : '') . '</a></th>';
+    echo '<th style="text-align:right"><a class="athlete-sort-link" href="' . htmlspecialchars($scoreSortHref, ENT_QUOTES, 'UTF-8') . '" data-tip="' . $scoreSortTip . '">Score' . ($sort === 'score' ? ' ↓' : '') . '</a></th>';
     echo '</tr>';
 
     $rowIndex = 0;
     $place = 0;
-    $previousScore = null;
+    $previousValue = null;
     foreach ($visibleAthletes as $athleteName => $athlete) {
         $score = (float)$athlete['score'];
+        $rankingValue = $sort === 'sb' ? (int)($athlete['sb_count'] ?? 0) : $score;
         $rowIndex++;
-        if ($previousScore === null || $score !== $previousScore) {
+        if ($previousValue === null || $rankingValue !== $previousValue) {
             $place = $rowIndex;
-            $previousScore = $score;
+            $previousValue = $rankingValue;
         }
 
         $displayName = $athlete['display_name'] ?? $athleteName;
         echo '<tr>';
         echo '<td style="text-align:right">' . $place . '</td>';
         echo '<td>' . htmlspecialchars($displayName) . '</td>';
+        echo '<td style="text-align:right">' . htmlspecialchars((string)($athlete['age'] ?? '')) . '</td>';
         if (!$clubFilter) {
             echo '<td>' . htmlspecialchars(implode(', ', $athlete['clubs'] ?? [$athlete['club'] ?? ''])) . '</td>';
         }
         echo '<td style="text-align:right">' . number_format((float)($athlete['meet_pf'] ?? 0), 2) . '</td>';
+        echo '<td style="text-align:right">' . (int)($athlete['sb_count'] ?? 0) . '</td>';
         echo '<td style="text-align:right">' . number_format($score) . '</td>';
         echo '</tr>';
     }

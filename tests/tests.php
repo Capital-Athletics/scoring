@@ -63,6 +63,25 @@ function scoringTestSuite() {
                 assertTrueValue($club['score'] > 0, "Expected positive club score for {$clubName}");
             }
         },
+        'athlete_score_breakdown_counts_the_best_three_events_in_every_view' => function () {
+            $athlete = [
+                'age' => 16,
+                'events' => [
+                    '100m' => [buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #1', 16, 'Male', 12.0)],
+                    '200m' => [buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '200m', 'SS #1', 16, 'Male', 25.0)],
+                    '400m' => [buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '400m', 'SS #1', 16, 'Male', 55.0)],
+                    '800m' => [buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '800m', 'SS #1', 16, 'Male', 135.0)],
+                ],
+            ];
+            $meetEventArray = [['name' => 'SS #1', 'events' => ['100m', '200m', '400m', '800m']]];
+
+            $caBreakdown = buildAthleteScoreBreakdown($athlete, $meetEventArray, false);
+            $clubBreakdown = buildAthleteScoreBreakdown($athlete, $meetEventArray, true);
+
+            assertCountValue(3, $caBreakdown['totals']);
+            assertCountValue(3, $clubBreakdown['totals']);
+            assertSameValue($caBreakdown['total'], $clubBreakdown['total']);
+        },
         'club_cpf_helpers_return_numeric_precision' => function () {
             $cpfOld = calcClubParticipationFactor(1, 3);
             $cpfNew = calcAverageAthleteMeetParticipationFactor([
@@ -207,6 +226,62 @@ function scoringTestSuite() {
 
             assertSameValue(['Taylor SpaceDob'], $warnings);
         },
+        'season_bests_follow_meet_date_and_require_strict_time_improvements' => function () {
+            $rows = [
+                buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #2', 16, 'Male', 11.0),
+                buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #1', 16, 'Male', 12.0),
+                buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #3', 16, 'Male', 11.0),
+                buildTestRow('Taylor', 'Runner', '11/28/2008', 'Woden Athletics', '100m', 'SS #4', 16, 'Male', 10.5),
+            ];
+            $dates = ['2026-02-12', '2026-02-05', '2026-02-19', '2026-02-26'];
+            foreach ($rows as $index => $row) {
+                $rows[$index]['meet_date_ts'] = strtotime($dates[$index]);
+            }
+
+            $athlete = groupResultsByAthlete($rows)['Taylor Runner|2008-11-28'];
+            $summary = buildAthleteEventSummary($athlete, '100m', $athlete['events']['100m'], [
+                ['name' => 'SS #1', 'events' => ['100m']],
+                ['name' => 'SS #2', 'events' => ['100m']],
+                ['name' => 'SS #3', 'events' => ['100m']],
+                ['name' => 'SS #4', 'events' => ['100m']],
+            ]);
+
+            assertSameValue(['SS #1', 'SS #2', 'SS #3', 'SS #4'], array_column($summary['meets'], 'name'));
+            assertSameValue([false, true, false, true], array_column($summary['meets'], 'is_season_best'));
+            assertSameValue(2, $summary['sb_count']);
+        },
+        'season_bests_count_strict_field_improvements' => function () {
+            $athlete = ['age' => 16];
+            $results = [
+                buildTestRow('Taylor', 'Jumper', '11/28/2008', 'Woden Athletics', 'Long Jump', 'SS #1', 16, 'Male', 4.0),
+                buildTestRow('Taylor', 'Jumper', '11/28/2008', 'Woden Athletics', 'Long Jump', 'SS #2', 16, 'Male', 4.5),
+                buildTestRow('Taylor', 'Jumper', '11/28/2008', 'Woden Athletics', 'Long Jump', 'SS #3', 16, 'Male', 4.5),
+            ];
+            $summary = buildAthleteEventSummary($athlete, 'Long Jump', $results, [
+                ['name' => 'SS #1', 'events' => ['Long Jump']],
+                ['name' => 'SS #2', 'events' => ['Long Jump']],
+                ['name' => 'SS #3', 'events' => ['Long Jump']],
+            ]);
+
+            assertSameValue([false, true, false], array_column($summary['meets'], 'is_season_best'));
+            assertSameValue(1, $summary['sb_count']);
+        },
+        'render_athlete_event_summary_displays_season_best_count_and_star' => function () {
+            $html = renderAthleteEventSummary([
+                'event' => '100m',
+                'meets' => [[
+                    'name' => 'SS #2', 'result_str' => '11.00', 'score_data' => ['score' => 700, 'status' => 'ok', 'meta' => []],
+                    'participation_score' => 1, 'has_missing_record' => false, 'is_season_best' => true,
+                ]],
+                'best_score' => 700, 'participation_score' => 1, 'final_score' => 700, 'sb_count' => 1,
+            ]);
+
+            assertContainsValue('⭐', $html);
+            assertContainsValue('[PF=1.00] ⭐', $html);
+            assertContainsValue('<br><strong>SB:</strong> 1', $html);
+            assertContainsValue('<span class="act-tooltip-trigger"', $html);
+            assertNotContainsValue('act-score-btn', $html);
+        },
         'render_athlete_scores_table_limits_to_top_twenty_and_adds_show_all_link' => function () {
             $athletes = [];
 
@@ -226,7 +301,7 @@ function scoringTestSuite() {
             assertContainsValue('Athlete 01', $html);
             assertContainsValue('Athlete 20', $html);
             assertNotContainsValue('Athlete 21', $html);
-            assertContainsValue('<th style="width:50px"></th><th>Name</th>', $html);
+            assertContainsValue('<th style="width:50px"></th><th>Name</th><th style="text-align:right">Age</th>', $html);
             assertContainsValue('>1<', $html);
             assertContainsValue('>20<', $html);
             assertContainsValue('Show all', $html);
@@ -255,6 +330,24 @@ function scoringTestSuite() {
             ]);
 
             assertContainsValue('?comp=hn&amp;verbose=1&amp;records=1&amp;all_athletes=1', $html);
+        },
+        'render_athlete_scores_table_sorts_by_sb_and_preserves_selected_sort' => function () {
+            $athletes = [
+                'Alex Example' => ['display_name' => 'Alex Example', 'age' => 16, 'clubs' => ['Woden Athletics'], 'meet_pf' => 1, 'score' => 150, 'sb_count' => 2],
+                'Bailey Example' => ['display_name' => 'Bailey Example', 'age' => 17, 'clubs' => ['Woden Athletics'], 'meet_pf' => 1, 'score' => 160, 'sb_count' => 2],
+                'Casey Example' => ['display_name' => 'Casey Example', 'age' => 18, 'clubs' => ['Woden Athletics'], 'meet_pf' => 1, 'score' => 200, 'sb_count' => 1],
+            ];
+
+            $html = renderAthleteScoresTable($athletes, false, true, ['athletes' => '1', 'sort' => 'sb'], 'sb');
+
+            assertTrueValue(strpos($html, 'Bailey Example') < strpos($html, 'Alex Example'), 'Expected score to break SB ties');
+            assertContainsValue('?athletes=1&amp;sort=score&amp;all_athletes=1', $html);
+            assertContainsValue('?athletes=1&amp;sort=sb&amp;all_athletes=1', $html);
+            assertContainsValue('>SB ↓</a>', $html);
+            assertNotContainsValue('>Score ↓</a>', $html);
+            assertNotContainsValue('<select name="sort"', $html);
+            assertContainsValue('<th style="text-align:right">Age</th>', $html);
+            assertContainsValue('>17</td>', $html);
         },
         'render_athlete_scores_table_uses_competition_places_for_tied_scores' => function () {
             $athletes = [
@@ -362,11 +455,16 @@ function scoringTestSuite() {
                 true,
                 true,
                 'Woden Athletics',
-                ['ACT Masters Athletics', 'Woden Athletics']
+                ['ACT Masters Athletics', 'Woden Athletics'],
+                [['season' => '2025-26', 'comp' => 'Summer Series'], ['season' => '2026-27', 'comp' => 'High Noon']],
+                '2026-27',
+                'High Noon'
             );
 
-            assertContainsValue('name="comp" value="winter"', $html);
+            assertNotContainsValue('name="comp" value="winter"', $html);
             assertContainsValue('name="records" value="1"', $html);
+            assertContainsValue('Data set <select name="dataset"', $html);
+            assertContainsValue('<option value="2026-27/High Noon" selected>2026-27 / High Noon</option>', $html);
             assertContainsValue('name="athletes" value="1" checked disabled', $html);
             assertNotContainsValue('toggle-fallback', $html);
             assertContainsValue('<option value="Woden Athletics" selected>', $html);
@@ -382,20 +480,46 @@ function scoringTestSuite() {
             assertNotContainsValue('disabled', $html);
         },
         'normalise_competition_key_rejects_invalid_or_unknown_values' => function () {
-            assertSameValue('ss', normaliseCompetitionKey('../reference'));
-            assertSameValue('ss', normaliseCompetitionKey('does-not-exist'));
-            assertSameValue('hn', normaliseCompetitionKey('hn'));
+            assertSameValue('Summer Series', normaliseCompetitionKey('../reference', '2025-26'));
+            assertSameValue('Summer Series', normaliseCompetitionKey('does-not-exist', '2025-26'));
+            assertSameValue('High Noon', normaliseCompetitionKey('High Noon', '2025-26'));
+            assertSameValue('High Noon', normaliseCompetitionKey('High Noon', '2026-27'));
+        },
+        'competition_keys_allow_readable_folder_names_but_not_path_characters' => function () {
+            assertTrueValue(isValidCompetitionKey('Summer Series'), 'Expected readable competition folder names to be valid');
+            assertTrueValue(isValidCompetitionKey('High-Noon_2026'), 'Expected hyphenated and underscored competition folder names to be valid');
+            assertTrueValue(!isValidCompetitionKey('../reference'), 'Expected path traversal characters to be rejected');
+            assertTrueValue(!isValidCompetitionKey('Summer/Series'), 'Expected path separators to be rejected');
+        },
+        'normalise_meet_name_preserves_competition_name_casing' => function () {
+            assertSameValue('Summer Series #1', normaliseMeetName('/tmp/1.csv', 'Summer Series'));
+        },
+        'normalise_season_key_rejects_invalid_or_unknown_values' => function () {
+            assertSameValue('2026-27', normaliseSeasonKey('../reference'));
+            assertSameValue('2026-27', normaliseSeasonKey('2027-28'));
+            assertSameValue('2026-27', normaliseSeasonKey('2026-27'));
+        },
+        'available_competition_datasets_includes_each_season_and_competition' => function () {
+            assertSameValue([
+                ['season' => '2025-26', 'comp' => 'High Noon'],
+                ['season' => '2025-26', 'comp' => 'Summer Series'],
+                ['season' => '2026-27', 'comp' => 'High Noon'],
+                ['season' => '2026-27', 'comp' => 'Summer Series'],
+            ], availableCompetitionDatasets());
+            assertSameValue(['season' => '2026-27', 'comp' => 'Summer Series'], defaultCompetitionDataset());
+            assertTrueValue(in_array(['season' => '2025-26', 'comp' => 'Summer Series'], availableCompetitionDatasets(), true), 'Expected the Summer Series dataset');
+            assertTrueValue(in_array(['season' => '2026-27', 'comp' => 'High Noon'], availableCompetitionDatasets(), true), 'Expected the new High Noon dataset');
         },
         'load_competition_files_in_club_view_intentionally_excludes_champs_files' => function () {
-            $files = array_values(loadCompetitionFiles('ss', 'Woden Athletics'));
+            $files = array_values(loadCompetitionFiles('2025-26', 'Summer Series', 'Woden Athletics'));
 
-            assertContainsValue('/data/ss/1.csv', $files[0] ?? '');
-            assertTrueValue(!in_array('/Volumes/www/peek.net.au/dev/scoring/data/ss/8-u20-open.csv', $files, true), 'Expected club-filtered files to exclude U20/Open champs');
-            assertTrueValue(!in_array('/Volumes/www/peek.net.au/dev/scoring/data/ss/9-u9-18.csv', $files, true), 'Expected club-filtered files to exclude U9-U18 champs');
+            assertContainsValue('/data/2025-26/Summer Series/1.csv', $files[0] ?? '');
+            assertTrueValue(!in_array('/Volumes/www/peek.net.au/dev/scoring/data/2025-26/Summer Series/8-u20-open.csv', $files, true), 'Expected club-filtered files to exclude U20/Open champs');
+            assertTrueValue(!in_array('/Volumes/www/peek.net.au/dev/scoring/data/2025-26/Summer Series/9-u9-18.csv', $files, true), 'Expected club-filtered files to exclude U9-U18 champs');
         },
         'local_ss_summary_snapshot_matches_expected_values' => function () {
-            $files = loadCompetitionFiles('ss', false);
-            $resultData = filterExcludedEvents(loadCompetitionResults($files, 'ss'));
+            $files = loadCompetitionFiles('2025-26', 'Summer Series', false);
+            $resultData = filterExcludedEvents(loadCompetitionResults($files, 'Summer Series'));
             $meetEventArray = buildMeetEventArray($resultData);
             $athletes = groupResultsByAthlete($resultData);
             $summary = buildAthleteSummaries($athletes, [], $meetEventArray, false);
@@ -424,7 +548,7 @@ function scoringTestSuite() {
                     'eligible' => 13,
                 ],
                 'lucas_butler' => [
-                    'score' => 1403.0,
+                    'score' => 1232.0,
                     'meet_pf' => '0.769231',
                     'attended' => 10,
                     'eligible' => 13,
@@ -432,8 +556,8 @@ function scoringTestSuite() {
             ], $snapshot);
         },
         'local_ss_data_has_three_joshua_smith_identities_after_normalisation' => function () {
-            $files = loadCompetitionFiles('ss', false);
-            $resultData = loadCompetitionResults($files, 'ss');
+            $files = loadCompetitionFiles('2025-26', 'Summer Series', false);
+            $resultData = loadCompetitionResults($files, 'Summer Series');
             $resultData = filterExcludedEvents($resultData);
             $athletes = groupResultsByAthlete($resultData);
 

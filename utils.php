@@ -132,8 +132,11 @@ function getData($filename, $comp) {
     return $data;
 }
 
-function loadCompetitionFiles($comp, $clubFilter) {
-    $files = glob(dirname(__FILE__) . '/data/' . $comp . '/*.csv');
+const FALLBACK_SEASON_KEY = '2025-26';
+const FALLBACK_COMPETITION_KEY = 'Summer Series';
+
+function loadCompetitionFiles($season, $comp, $clubFilter) {
+    $files = glob(dirname(__FILE__) . '/data/' . $season . '/' . $comp . '/*.csv');
 
     if ($clubFilter) {
         // Club-filtered view intentionally excludes champs files and only uses numbered meet files.
@@ -157,14 +160,14 @@ function loadCompetitionResults($files, $comp) {
     return $resultData;
 }
 
-function availableCompetitionKeys() {
+function availableSeasonKeys() {
     $paths = glob(dirname(__FILE__) . '/data/*', GLOB_ONLYDIR) ?: [];
     $keys = [];
 
     foreach ($paths as $path) {
         $basename = basename($path);
 
-        if (preg_match('/^[a-z0-9_-]+$/i', $basename)) {
+        if (preg_match('/^\d{4}-\d{2}$/', $basename)) {
             $keys[$basename] = true;
         }
     }
@@ -172,24 +175,96 @@ function availableCompetitionKeys() {
     return array_keys($keys);
 }
 
-function normaliseCompetitionKey($comp) {
+function defaultCompetitionDataset() {
+    $seasons = availableSeasonKeys();
+    sort($seasons, SORT_NATURAL);
+    $season = $seasons ? end($seasons) : FALLBACK_SEASON_KEY;
+
+    $comps = availableCompetitionKeys($season);
+    sort($comps, SORT_NATURAL);
+    $comp = $comps ? end($comps) : FALLBACK_COMPETITION_KEY;
+
+    return [
+        'season' => $season,
+        'comp' => $comp,
+    ];
+}
+
+function normaliseSeasonKey($season) {
+    $season = trim((string)$season);
+    $defaultDataset = defaultCompetitionDataset();
+
+    if ($season === '' || !preg_match('/^\d{4}-\d{2}$/', $season)) {
+        return $defaultDataset['season'];
+    }
+
+    if (in_array($season, availableSeasonKeys(), true)) {
+        return $season;
+    }
+
+    return $defaultDataset['season'];
+}
+
+function availableCompetitionKeys($season = FALLBACK_SEASON_KEY) {
+    $paths = glob(dirname(__FILE__) . '/data/' . $season . '/*', GLOB_ONLYDIR) ?: [];
+    $keys = [];
+
+    foreach ($paths as $path) {
+        $basename = basename($path);
+
+        if (isValidCompetitionKey($basename)) {
+            $keys[$basename] = true;
+        }
+    }
+
+    return array_keys($keys);
+}
+
+function isValidCompetitionKey($comp) {
+    return preg_match('/^[a-z0-9][a-z0-9 _-]*$/i', trim((string)$comp)) === 1;
+}
+
+function normaliseCompetitionKey($comp, $season = FALLBACK_SEASON_KEY) {
     $comp = trim((string)$comp);
+    $availableComps = availableCompetitionKeys($season);
+    sort($availableComps, SORT_NATURAL);
+    $fallbackComp = in_array(FALLBACK_COMPETITION_KEY, $availableComps, true)
+        ? FALLBACK_COMPETITION_KEY
+        : (count($availableComps) ? $availableComps[array_key_last($availableComps)] : FALLBACK_COMPETITION_KEY);
 
     if ($comp === '') {
-        return 'ss';
+        return $fallbackComp;
     }
 
-    if (!preg_match('/^[a-z0-9_-]+$/i', $comp)) {
-        return 'ss';
+    if (!isValidCompetitionKey($comp)) {
+        return $fallbackComp;
     }
-
-    $availableComps = availableCompetitionKeys();
 
     if (in_array($comp, $availableComps, true)) {
         return $comp;
     }
 
-    return 'ss';
+    return $fallbackComp;
+}
+
+function availableCompetitionDatasets() {
+    $datasets = [];
+    $seasons = availableSeasonKeys();
+    sort($seasons, SORT_NATURAL);
+
+    foreach ($seasons as $season) {
+        $comps = availableCompetitionKeys($season);
+        sort($comps, SORT_NATURAL);
+
+        foreach ($comps as $comp) {
+            $datasets[] = [
+                'season' => $season,
+                'comp' => $comp,
+            ];
+        }
+    }
+
+    return $datasets;
 }
 
 function filterExcludedEvents($resultData) {
@@ -339,8 +414,26 @@ function buildAthleteDobIdentityKey($dobRaw, $dobTimestamp = null) {
 }
 
 function sortAthletesByScore($athletes) {
-    uasort($athletes, function ($a, $b) {
-        return $b['score'] <=> $a['score'];
+    return sortAthletes($athletes, 'score');
+}
+
+function sortAthletes($athletes, $sort = 'score') {
+    $sort = $sort === 'sb' ? 'sb' : 'score';
+
+    uasort($athletes, function ($a, $b) use ($sort) {
+        if ($sort === 'sb') {
+            $sbCompare = (int)($b['sb_count'] ?? 0) <=> (int)($a['sb_count'] ?? 0);
+            if ($sbCompare !== 0) {
+                return $sbCompare;
+            }
+        }
+
+        $scoreCompare = (float)($b['score'] ?? 0) <=> (float)($a['score'] ?? 0);
+        if ($scoreCompare !== 0) {
+            return $scoreCompare;
+        }
+
+        return strcasecmp((string)($a['display_name'] ?? ''), (string)($b['display_name'] ?? ''));
     });
 
     return $athletes;
@@ -411,10 +504,8 @@ function buildAthleteScoreBreakdown($athlete, $meetEventArray, $clubFilteredView
         $athleteTotals[] = $eventSummary['final_score'];
     }
 
-    if (!$clubFilteredView) {
-        rsort($athleteTotals);
-        $athleteTotals = array_slice($athleteTotals, 0, 4);
-    }
+    rsort($athleteTotals);
+    $athleteTotals = array_slice($athleteTotals, 0, 3);
 
     return [
         'event_summaries' => $eventSummaries,
@@ -540,6 +631,7 @@ function buildAthleteSummaries($athletes, $clubsData, $meetEventArray, $clubFilt
         $athletes[$athleteKey]['attended_meet_count'] = $meetParticipation['attended_meet_count'];
         $athletes[$athleteKey]['eligible_meet_count'] = $meetParticipation['eligible_meet_count'];
         $athletes[$athleteKey]['meet_pf'] = $meetParticipation['meet_pf'];
+        $athletes[$athleteKey]['sb_count'] = array_sum(array_column($eventSummaries, 'sb_count'));
         $athleteSummaries[] = [
             'name' => $athleteName,
             'athlete' => $athletes[$athleteKey],
@@ -700,7 +792,7 @@ function normaliseMeetName($filename, $comp) {
     $meet = str_replace(['/', '-'], ' ', $basename);
     $meet = preg_replace('/([0-9]+)/', '#$1', $meet);
 
-    return strtoupper($comp) . ' ' . ucwords($meet);
+    return trim((string)$comp) . ' ' . ucwords($meet);
 }
 
 function normaliseClubName($clubName) {

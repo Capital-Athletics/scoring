@@ -6,10 +6,20 @@ include_once 'render.php';
 
 $verbose = filter_var($_GET['verbose'] ?? false, FILTER_VALIDATE_BOOLEAN);
 $clubFilter = $_GET['club'] ?? false;
-$comp = normaliseCompetitionKey($_GET['comp'] ?? 'ss');
+$dataset = trim((string)($_GET['dataset'] ?? ''));
+$defaultDataset = defaultCompetitionDataset();
+
+if (preg_match('/^(\d{4}-\d{2})\/(.+)$/', $dataset, $datasetParts)) {
+    $season = normaliseSeasonKey($datasetParts[1]);
+    $comp = normaliseCompetitionKey($datasetParts[2], $season);
+} else {
+    $season = normaliseSeasonKey($_GET['season'] ?? $defaultDataset['season']);
+    $comp = normaliseCompetitionKey($_GET['comp'] ?? $defaultDataset['comp'], $season);
+}
 $showAthletes = filter_var($_GET['athletes'] ?? true, FILTER_VALIDATE_BOOLEAN);
 $showAllAthletes = filter_var($_GET['all_athletes'] ?? false, FILTER_VALIDATE_BOOLEAN);
 $showPotentialRecords = filter_var($_GET['records'] ?? false, FILTER_VALIDATE_BOOLEAN);
+$athleteSort = ($_GET['sort'] ?? 'score') === 'sb' ? 'sb' : 'score';
 $showAthletes = $clubFilter ? true : $showAthletes;
 
 $assetCssVersion = @filemtime(__DIR__ . '/assets/app.css') ?: time();
@@ -21,7 +31,7 @@ $clubNames = array_keys($clubsData);
 natcasesort($clubNames);
 
 // Find the CSV result files for this competition and put them in the right order.
-$files = loadCompetitionFiles($comp, $clubFilter);
+$files = loadCompetitionFiles($season, $comp, $clubFilter);
 
 // Read every CSV file and turn it into one list of athlete results.
 $resultData = loadCompetitionResults($files, $comp);
@@ -50,18 +60,26 @@ $potentialRecords = $summaryData['potential_records'];
 $output = renderAthleteSummaries($summaryData['athlete_summaries']);
 $unknownDobWarnings = collectUnknownDobAthleteNames($athletes);
 
-// Put the highest-scoring athletes at the top of the summary table.
-$athletes = sortAthletesByScore($athletes);
+// Put athletes in the requested ranking order for the summary table.
+$athletes = sortAthletes($athletes, $athleteSort);
 
 $toggleQueryParams = [
 ];
 
-if ($comp !== 'ss') {
+if ($season !== $defaultDataset['season']) {
+    $toggleQueryParams['season'] = $season;
+}
+
+if ($comp !== $defaultDataset['comp']) {
     $toggleQueryParams['comp'] = $comp;
 }
 
 if ($showPotentialRecords) {
     $toggleQueryParams['records'] = '1';
+}
+
+if ($athleteSort === 'sb') {
+    $toggleQueryParams['sort'] = 'sb';
 }
 
 $athleteTableQueryParams = $toggleQueryParams;
@@ -78,14 +96,14 @@ ob_start();
 
 echo renderDataWarnings($unknownDobWarnings);
 
-echo renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFilter, $clubNames);
+echo renderViewToggles($toggleQueryParams, $verbose, $showAthletes, $clubFilter, $clubNames, availableCompetitionDatasets(), $season, $comp);
 
 if ($verbose) {
     echo $output;
 }
 
 if ($showAthletes) {
-    echo renderAthleteScoresTable($athletes, $clubFilter, $showAllAthletes, $athleteTableQueryParams);
+    echo renderAthleteScoresTable($athletes, $clubFilter, $showAllAthletes, $athleteTableQueryParams, $athleteSort);
 }
 
 // output club scores
